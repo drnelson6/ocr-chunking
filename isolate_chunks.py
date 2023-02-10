@@ -31,11 +31,12 @@ def convert_pdf(pdf_doc, dpi):
 file_path = 'P:/Center for Digital Scholarship/Fellows/Maeve Kane/baptismal-records-pdfs/type 2 - most common/ny-success-drc-ed-jfrost.pdf'
 
 # list for holding output
-
 output = []
+
 # get temporary directory of Image objects
 with tempfile.TemporaryDirectory() as path:
     images = convert_pdf(file_path, 300)
+    # run process on each image
     for i in images:
         gray = cv2.cvtColor(i, cv2.COLOR_BGR2GRAY)
         # threshing to improve contouring - need binary image
@@ -56,7 +57,7 @@ with tempfile.TemporaryDirectory() as path:
             cropped = i[y:y + h, x:x + w]
             text = pytesseract.image_to_string(cropped)
             tesseract_output.append(text)
-        output.append(tesseract_output)
+        output.append(''.join(tesseract_output))
     # uncomment to view image output
     # cv2.imshow('Window', i)
     # cv2.waitKey(0)
