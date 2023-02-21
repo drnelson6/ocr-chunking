@@ -8,9 +8,11 @@ Created on Thu Feb  9 14:08:30 2023
 from pdf2image import convert_from_path
 import tempfile
 import numpy as np
+import cv2
+from sklearn.cluster import AgglomerativeClustering
 # from PIL import Image
 import pytesseract
-import cv2
+import csv
 
 
 def convert_pdf(pdf_doc, dpi):
@@ -28,7 +30,7 @@ def convert_pdf(pdf_doc, dpi):
     return images
 
 
-file_path = 'P:/Center for Digital Scholarship/Fellows/Maeve Kane/baptismal-records-pdfs/type 2 - most common/ny-success-drc-ed-jfrost.pdf'
+file_path = '/path/to/file.pdf'
 
 # list for holding output
 output = []
@@ -37,7 +39,9 @@ output = []
 with tempfile.TemporaryDirectory() as path:
     images = convert_pdf(file_path, 300)
     # run process on each image
+    n = 1
     for i in images:
+        print(f'Processing page {n}...')
         gray = cv2.cvtColor(i, cv2.COLOR_BGR2GRAY)
         # threshing to improve contouring - need binary image
         gray = cv2.threshold(gray, 0, 255,
@@ -47,20 +51,55 @@ with tempfile.TemporaryDirectory() as path:
         # dilate image - create large blobs of text to detect clusters
         dilation = cv2.dilate(gray, rect_kernel, iterations=3)
         # standard contouring method
-        contours, hierarchy = cv2.findContours(dilation, cv2.RETR_LIST,
-                                               cv2.CHAIN_APPROX_NONE)
-        # get bbox for all contours and draw to Image object
-        tesseract_output = []
-        for cnt in contours:
-            x, y, w, h = cv2.boundingRect(cnt)
-            rect = cv2.rectangle(i, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cropped = i[y:y + h, x:x + w]
-            text = pytesseract.image_to_string(cropped)
-            tesseract_output.append(text)
-        output.append(''.join(tesseract_output))
-    # uncomment to view image output
-    # cv2.imshow('Window', i)
-    # cv2.waitKey(0)
+        contours = cv2.findContours(dilation, cv2.RETR_LIST,
+                                    cv2.CHAIN_APPROX_NONE)[0]
 
-with open('output.txt', 'w', encoding='utf-8') as f:
-    f.write('\n'.join(output))
+        # initialize empty list to sort clusters
+        sorted_clusters = []
+        # get bboxes for all contours
+        bbox = [cv2.boundingRect(c) for c in contours]
+        # extract y coordinates only
+        y_coords = [(0, c[1]) for c in bbox]
+
+        # apply clustering algorithm
+        try:
+            clustering = AgglomerativeClustering(
+                n_clusters=None,
+                affinity="manhattan",
+                linkage="complete",
+                distance_threshold=25.0)
+            clustering.fit(y_coords)
+
+            # loop over all clusters
+            for q in np.unique(clustering.labels_):
+                idxs = np.where(clustering.labels_ == q)[0]
+                avg = np.average([bbox[i][1] for i in idxs])
+                sorted_clusters.append((q, avg))
+                # sort clusters by average y coordinate
+                sorted_clusters.sort(key=lambda x: x[1])
+
+            # empty list to hold tesseract output
+            tesseract_output = []
+            for (q, _) in sorted_clusters:
+                # extract indices for the coordinates for each cluster
+                idxs = np.where(clustering.labels_ == q)[0]
+                # extract x coorindates from items in each cluster, then sort
+                # left to right
+                x_coords = [bbox[x][0] for x in idxs]
+                sorted_idxs = idxs[np.argsort(x_coords)]
+                row = []
+                for foo in sorted_idxs:
+                    x, y, w, h = bbox[foo]
+                    cropped = i[y:y + h, x:x + w]
+                    text = pytesseract.image_to_string(cropped)
+                    row.append(text.strip())
+                with open('output.csv', 'a', newline='',
+                          encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(row)
+        except ValueError:
+            print(f"Page {n} can't be processed.")
+        n = n + 1
+
+# with open('output.txt', 'w', encoding='utf-8') as f:
+#     f.write('\n'.join(output))
